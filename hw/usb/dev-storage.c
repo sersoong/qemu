@@ -88,7 +88,7 @@ enum {
     STR_CONFIG_SUPER,
 };
 
-static const USBDescStrings desc_strings = {
+static USBDescStrings desc_strings = {
     [STR_MANUFACTURER] = "QEMU",
     [STR_PRODUCT]      = "QEMU USB HARDDRIVE",
     [STR_SERIALNUMBER] = "1",
@@ -204,7 +204,7 @@ static const USBDescDevice desc_device_super = {
     },
 };
 
-static const USBDesc desc = {
+static USBDesc desc = {
     .id = {
         .idVendor          = 0x46f4, /* CRC16() of "QEMU" */
         .idProduct         = 0x0001,
@@ -682,7 +682,6 @@ static USBDevice *usb_msd_init(USBBus *bus, const char *filename)
     QemuOpts *opts;
     DriveInfo *dinfo;
     USBDevice *dev;
-    const char *p1;
     char fmt[32];
 
     /* parse -usbdevice disk: syntax into drive opts */
@@ -691,20 +690,53 @@ static USBDevice *usb_msd_init(USBBus *bus, const char *filename)
         opts = qemu_opts_create(qemu_find_opts("drive"), id, 1, NULL);
     } while (!opts);
 
-    p1 = strchr(filename, ':');
-    if (p1++) {
-        const char *p2;
+    int filename_len = strlen(filename)+1;
+    char c_filename[filename_len];
+    pstrcpy(c_filename, filename_len, filename);
+    char* comp;
+    char delim = ':';
+    char subdelim = '=';
 
-        if (strstart(filename, "format=", &p2)) {
-            int len = MIN(p1 - p2, sizeof(fmt));
-            pstrcpy(fmt, len, p2);
+    comp = strtok(c_filename, &delim); //this actually modifies the parsee in place, hence the copy.
+    while(comp){
+        const char *p;
+        if (strstart(comp, "format=", &p)) {
+            int len = MIN(comp - p, sizeof(fmt));
+            pstrcpy(fmt, len, p);
             qemu_opt_set(opts, "format", fmt, &error_abort);
-        } else if (*filename != ':') {
+        }
+        else if (strstart(comp, "vid=", &p)) {
+            desc.id.idVendor = (uint16_t) strtol(p, NULL, 16);
+        }
+        else if (strstart(comp, "pid=", &p)) {
+            desc.id.idProduct = (uint16_t) strtol(p, NULL, 16);
+        }
+        else if (strstart(comp, "manufacturer=", &p)) {
+            char* manuf = malloc(strlen(p)+1);
+            pstrcpy(manuf, strlen(p)+1, p);
+            desc_strings[STR_MANUFACTURER] = manuf;
+        }
+        else if (strstart(comp, "product=", &p)) {
+            char* product = malloc(strlen(p)+1);
+            pstrcpy(product, strlen(p)+1, p);
+            desc_strings[STR_PRODUCT] = product;
+        }
+        else if (strstart(comp, "serial=", &p)) {
+            char* serial = malloc(strlen(p)+1);
+            pstrcpy(serial, strlen(p)+1, p);
+            desc_strings[STR_SERIALNUMBER] = serial;
+        }
+        else if (index(comp, (int) subdelim) != NULL) {
             error_report("unrecognized USB mass-storage option %s", filename);
             return NULL;
         }
-        filename = p1;
+        else {
+            filename = comp;
+        }
+        comp = strtok(NULL, &delim); //advance to next token
     }
+
+
     if (!*filename) {
         error_report("block device specification needed");
         return NULL;
